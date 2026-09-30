@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>The Menagerie — a tiny 3D animal sanctuary</title>
+<style>
+  :root {
+    --ink: #1d2b23;
+    --panel: rgba(255, 255, 255, 0.72);
+    --accent: #2f9e5f;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; }
+  body {
+    font-family: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+    color: var(--ink);
+    background: #aee2ff;
+  }
+  #scene { position: fixed; inset: 0; display: block; }
+
+  /* ---------- loading overlay ---------- */
+  #loader {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 18px;
+    background: linear-gradient(160deg, #bfe8ff 0%, #e8f9ef 60%, #d9f2df 100%);
+    transition: opacity 0.9s ease, visibility 0.9s;
+  }
+  #loader.done { opacity: 0; visibility: hidden; pointer-events: none; }
+  #loader .paw { font-size: 54px; animation: bounce 1.1s ease-in-out infinite; }
+  #loader h1 { font-size: 30px; letter-spacing: 0.5px; font-weight: 700; }
+  #loader p { opacity: 0.65; font-size: 14px; }
+  #bar-wrap { width: 240px; height: 8px; border-radius: 99px; background: rgba(0,0,0,0.08); overflow: hidden; }
+  #bar { height: 100%; width: 0%; border-radius: 99px;
+    background: linear-gradient(90deg, #2f9e5f, #7ed491);
+    transition: width 0.35s ease; }
+  @keyframes bounce { 0%,100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-14px) scale(1.06); } }
+
+  /* ---------- HUD ---------- */
+  .hud { position: fixed; z-index: 10; opacity: 0; animation: rise 1s ease 0.9s forwards; }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+
+  #title-card {
+    top: 22px; left: 22px;
+    background: var(--panel);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,0.7);
+    border-radius: 18px; padding: 16px 20px;
+    box-shadow: 0 12px 32px rgba(30, 80, 50, 0.14);
+    max-width: 320px;
+  }
+  #title-card h1 { font-size: 24px; font-weight: 800; letter-spacing: 0.3px; }
+  #title-card h1 .leaf { color: var(--accent); }
+  #title-card p { font-size: 13px; opacity: 0.7; margin-top: 4px; line-height: 1.45; }
+
+  #controls-bar { top: 22px; right: 22px; display: flex; gap: 10px; }
+  .btn {
+    border: 1px solid rgba(255,255,255,0.7);
+    background: var(--panel);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border-radius: 14px; padding: 10px 16px;
+    font-size: 13.5px; font-weight: 600; color: var(--ink);
+    cursor: pointer; box-shadow: 0 8px 22px rgba(30, 80, 50, 0.12);
+    transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+    font-family: inherit;
+  }
+  .btn:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(30,80,50,0.18); background: rgba(255,255,255,0.9); }
+  .btn:active { transform: translateY(0); }
+
+  #hint {
+    bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: rgba(20, 32, 26, 0.55); color: #fff;
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    padding: 9px 18px; border-radius: 99px; font-size: 13px;
+    white-space: nowrap; animation: rise 1s ease 1.4s forwards; opacity: 0;
+    pointer-events: none;
+  }
+  #hint b { color: #b8f0c9; }
+
+  #credits {
+    bottom: 18px; right: 20px; font-size: 11.5px; opacity: 0.75;
+    background: var(--panel); backdrop-filter: blur(10px);
+    padding: 7px 12px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.6);
+  }
+  #credits a { color: var(--accent); font-weight: 700; text-decoration: none; }
+
+  /* ---------- animal card ---------- */
+  #animal-card {
+    left: 22px; bottom: 22px; width: 300px;
+    background: var(--panel);
+    backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(255,255,255,0.7);
+    border-radius: 18px; padding: 18px 20px;
+    box-shadow: 0 14px 36px rgba(30, 80, 50, 0.16);
+    transform: translateY(24px); opacity: 0; pointer-events: none;
+    transition: transform 0.45s cubic-bezier(0.2, 0.9, 0.25, 1.2), opacity 0.35s ease;
+  }
+  #animal-card.show { transform: translateY(0); opacity: 1; pointer-events: auto; }
+  #animal-card .kicker { font-size: 11px; text-transform: uppercase; letter-spacing: 1.6px; color: var(--accent); font-weight: 800; }
+  #animal-card h2 { font-size: 26px; margin: 4px 0 6px; }
+  #animal-card p { font-size: 13.5px; line-height: 1.55; opacity: 0.78; }
+  #animal-card .row { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+  #mood { font-size: 12.5px; font-weight: 700; background: #e7f7ec; color: #237a45;
+    padding: 6px 12px; border-radius: 99px; }
+  #release { margin-left: auto; }
+
+  /* floating name tag that follows the selected animal */
+  #tag {
+    position: fixed; z-index: 9; pointer-events: none;
+    transform: translate(-50%, -130%);
+    background: rgba(20,32,26,0.72); color: #fff;
+    font-size: 12.5px; font-weight: 700; letter-spacing: 0.4px;
+    padding: 6px 14px; border-radius: 99px;
+    opacity: 0; transition: opacity 0.3s ease;
+    backdrop-filter: blur(8px);
+    white-space: nowrap;
+  }
+  #tag.show { opacity: 1; }
+  #tag::after {
+    content: ""; position: absolute; left: 50%; bottom: -5px;
+    transform: translateX(-50%);
+    border: 6px solid transparent; border-top-color: rgba(20,32,26,0.72); border-bottom: 0;
+  }
+
+  @media (max-width: 640px) {
+    #title-card { max-width: 230px; padding: 12px 15px; }
+    #title-card h1 { font-size: 19px; }
+    #title-card p { display: none; }
+    #animal-card { width: calc(100vw - 44px); }
+    #hint { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="loader">
+  <div class="paw">🐾</div>
+  <h1>The Menagerie</h1>
+  <div id="bar-wrap"><div id="bar"></div></div>
+  <p id="load-note">Waking up the animals…</p>
+</div>
+
+<canvas id="scene"></canvas>
+
+<div id="title-card" class="hud">
+  <h1>The Menagerie <span class="leaf">❧</span></h1>
+  <p>A tiny 3D sanctuary. Drag to look around, scroll to zoom, and click any animal to say hello.</p>
+</div>
+
+<div id="controls-bar" class="hud">
+  <button class="btn" id="daynight">🌙 Dusk</button>
+  <button class="btn" id="pause">⏸ Pause</button>
+</div>
+
+<div id="hint" class="hud">Tip: <b>click an animal</b> to follow it around</div>
+
+<div id="credits" class="hud">Animals by <a href="https://quaternius.com" target="_blank" rel="noopener">Quaternius</a> (CC0) · Built with Three.js</div>
+
+<div id="animal-card" class="hud">
+  <div class="kicker">Now visiting</div>
+  <h2 id="ac-name">Fox</h2>
+  <p id="ac-fact"></p>
+  <div class="row">
+    <span id="mood">strolling</span>
+    <button class="btn" id="release">Release ✕</button>
+  </div>
+</div>
+
+<div id="tag"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+/* ============================================================
+   Renderer / scene / camera
+============================================================ */
+const canvas = document.getElementById('scene');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0xcfeaf7, 55, 140);
+
+const camera = new THREE.PerspectiveCamera(46, window.innerWidth / window.innerHeight, 0.1, 400);
+camera.position.set(34, 26, 44);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 6;
+controls.maxDistance = 80;
+controls.maxPolarAngle = Math.PI * 0.49;
+controls.target.set(0, 1.2, 0);
+
+/* ============================================================
+   Sky dome (gradient), lights
+============================================================ */
+const skyUniforms = {
+  topColor:     { value: new THREE.Color(0x3f8fd6) },
+  midColor:     { value: new THREE.Color(0xaedcf5) },
+  bottomColor:  { value: new THREE.Color(0xeaf7e9) },
+};
+const sky = new THREE.Mesh(
+  new THREE.SphereGeometry(180, 32, 20),
+  new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: skyUniforms,
+    vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+    fragmentShader: `varying vec3 vP; uniform vec3 topColor; uniform vec3 midColor; uniform vec3 bottomColor;
+      void main(){ float h = normalize(vP).y;
+        vec3 c = h > 0.0 ? mix(midColor, topColor, pow(h, 0.65)) : mix(midColor, bottomColor, pow(-h, 0.8));
+        gl_FragColor = vec4(c, 1.0); }`
+  })
+);
+scene.add(sky);
+
+const hemi = new THREE.HemisphereLight(0xbfe3ff, 0x8fce7e, 0.85);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xfff2d9, 2.0);
+sun.position.set(28, 42, 18);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.left = -34; sun.shadow.camera.right = 34;
+sun.shadow.camera.top = 34; sun.shadow.camera.bottom = -34;
+sun.shadow.camera.far = 120;
+sun.shadow.bias = -0.0004;
+scene.add(sun);
+
+/* ============================================================
+   Island, pond, trees, rocks, flowers, clouds
+============================================================ */
+const R = 30; // island radius
+
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x77c25e, roughness: 1 });
+const ground = new THREE.Mesh(new THREE.CircleGeometry(R, 72), groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// island underside (a chunky disc so the edge looks nice)
+const under = new THREE.Mesh(
+  new THREE.CylinderGeometry(R, R * 0.82, 7, 72),
+  new THREE.MeshStandardMaterial({ color: 0x8a6844, roughness: 1 })
+);
+under.position.y = -3.55;
+scene.add(under);
+const underRim = new THREE.Mesh(
+  new THREE.TorusGeometry(R, 0.9, 12, 72),
+  new THREE.MeshStandardMaterial({ color: 0x6fae52, roughness: 1 })
+);
+underRim.rotation.x = Math.PI / 2;
+underRim.position.y = -0.15;
+scene.add(underRim);
+
+// pond
+const pond = new THREE.Mesh(
+  new THREE.CircleGeometry(5.2, 48),
+  new THREE.MeshStandardMaterial({ color: 0x4fb3e8, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.92 })
+);
+pond.rotation.x = -Math.PI / 2;
+pond.position.set(-11, 0.02, 9);
+pond.receiveShadow = true;
+scene.add(pond);
+const pondRim = new THREE.Mesh(
+  new THREE.RingGeometry(5.2, 6.1, 48),
+  new THREE.MeshStandardMaterial({ color: 0xd9c89a, roughness: 1 })
+);
+pondRim.rotation.x = -Math.PI / 2;
+pondRim.position.set(-11, 0.015, 9);
+pondRim.receiveShadow = true;
+scene.add(pondRim);
+
+const rand = (a, b) => a + Math.random() * (b - a);
+function scatterPos(minR, maxR, avoid = []) {
+  for (let i = 0; i < 40; i++) {
+    const a = Math.random() * Math.PI * 2, r = rand(minR, maxR);
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    if (avoid.every(p => Math.hypot(x - p[0], z - p[1]) > p[2])) return [x, z];
+  }
+  return [rand(-maxR, maxR), rand(-maxR, maxR)];
+}
+
+// trees
+const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8a5a33, roughness: 1 });
+const leafMats = [0x3f9e4d, 0x4fb862, 0x2f8a44].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 1 }));
+for (let i = 0; i < 16; i++) {
+  const [x, z] = scatterPos(12, R - 3, [[-11, 9, 8]]);
+  const tree = new THREE.Group();
+  const h = rand(1.6, 2.6);
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.34, h, 7), trunkMat);
+  trunk.position.y = h / 2; trunk.castShadow = true; tree.add(trunk);
+  const lm = leafMats[i % leafMats.length];
+  const layers = 2 + Math.floor(Math.random() * 2);
+  for (let l = 0; l < layers; l++) {
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(1.7 - l * 0.42, 1.6, 8), lm);
+    cone.position.y = h + 0.5 + l * 1.05;
+    cone.castShadow = true;
+    tree.add(cone);
+  }
+  const s = rand(0.8, 1.35);
+  tree.scale.setScalar(s);
+  tree.position.set(x, 0, z);
+  tree.rotation.y = Math.random() * Math.PI * 2;
+  scene.add(tree);
+}
+
+// rocks
+const rockMat = new THREE.MeshStandardMaterial({ color: 0x9aa3a8, roughness: 0.95, flatShading: true });
+for (let i = 0; i < 12; i++) {
+  const [x, z] = scatterPos(8, R - 2, [[-11, 9, 8]]);
+  const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(rand(0.35, 1.0), 0), rockMat);
+  rock.position.set(x, rand(0.1, 0.3), z);
+  rock.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+  rock.castShadow = true; rock.receiveShadow = true;
+  scene.add(rock);
+}
+
+// flowers (instanced little blossoms)
+{
+  const stemG = new THREE.CylinderGeometry(0.03, 0.03, 0.5, 5);
+  const headG = new THREE.IcosahedronGeometry(0.14, 0);
+  const stemM = new THREE.MeshStandardMaterial({ color: 0x3d8a45, roughness: 1 });
+  const cols = [0xff6b9d, 0xffd166, 0xff8c42, 0xc084fc, 0xffffff];
+  const N = 90;
+  const stems = new THREE.InstancedMesh(stemG, stemM, N);
+  const heads = new THREE.InstancedMesh(headG, new THREE.MeshStandardMaterial({ roughness: 0.8 }), N);
+  const d = new THREE.Object3D(); const col = new THREE.Color();
+  for (let i = 0; i < N; i++) {
+    const [x, z] = scatterPos(4, R - 2, [[-11, 9, 7.5]]);
+    d.position.set(x, 0.25, z); d.updateMatrix(); stems.setMatrixAt(i, d.matrix);
+    d.position.set(x, 0.55, z); d.updateMatrix(); heads.setMatrixAt(i, d.matrix);
+    heads.setColorAt(i, col.setHex(cols[i % cols.length]));
+  }
+  stems.castShadow = heads.castShadow = true;
+  scene.add(stems, heads);
+}
+
+// clouds (drift slowly)
+const clouds = [];
+const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, transparent: true, opacity: 0.92 });
+for (let i = 0; i < 6; i++) {
+  const g = new THREE.Group();
+  const n = 3 + Math.floor(Math.random() * 3);
+  for (let j = 0; j < n; j++) {
+    const s = new THREE.Mesh(new THREE.SphereGeometry(rand(1.6, 3.2), 12, 10), cloudMat);
+    s.position.set(j * rand(1.6, 2.6) - n, rand(-0.5, 0.5), rand(-1, 1));
+    s.scale.y = 0.62;
+    g.add(s);
+  }
+  g.position.set(rand(-60, 60), rand(20, 30), rand(-60, 60));
+  g.userData.speed = rand(0.25, 0.6);
+  clouds.push(g); scene.add(g);
+}
+
+// stars (visible at dusk)
+const starGeo = new THREE.BufferGeometry();
+{
+  const pts = [];
+  for (let i = 0; i < 400; i++) {
+    const a = Math.random() * Math.PI * 2, e = rand(0.15, 1.4), r = 165;
+    pts.push(Math.cos(a) * Math.cos(e) * r, Math.sin(e) * r, Math.sin(a) * Math.cos(e) * r);
+  }
+  starGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+}
+const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.4, transparent: true, opacity: 0, fog: false, sizeAttenuation: false });
+scene.add(new THREE.Points(starGeo, starMat));
+
+/* ============================================================
+   Animals
+============================================================ */
+const SPECIES = [
+  { file: 'models/fox.glb',   name: 'Ruby',   kind: 'Red Fox',  height: 0.95, speed: 2.2,
+    fact: 'Foxes use the Earth’s magnetic field to hunt. Ruby can hear a mouse squeak from 100 metres away.' },
+  { file: 'models/wolf.glb',  name: 'Ash',    kind: 'Grey Wolf', height: 1.25, speed: 2.6,
+    fact: 'Wolves can trot for hours without tiring. Ash is just out for an evening patrol of the island.' },
+  { file: 'models/stag.glb',  name: 'Bramble', kind: 'Red Stag', height: 1.7,  speed: 2.0,
+    fact: 'A stag’s antlers regrow every single year. Bramble is very proud of this year’s set.' },
+  { file: 'models/horse.glb', name: 'Willow', kind: 'Wild Horse', height: 1.8, speed: 3.0, gallop: true,
+    fact: 'Horses sleep standing up. Willow, however, is far too busy exploring to nap right now.' },
+];
+
+const loader = new GLTFLoader();
+const animals = [];
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+let selected = null;
+
+const bar = document.getElementById('bar');
+const loadNote = document.getElementById('load-note');
+let loadedCount = 0;
+
+function clipBySuffix(clips, suffix) {
+  const norm = c => c.name.split('|').pop();
+  return clips.find(c => norm(c) === suffix)
+      || clips.find(c => norm(c).toLowerCase() === suffix.toLowerCase())
+      || null;
+}
+
+function makeFallback(color) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.35, 0.9, 6, 12),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.9 })
+  );
+  body.rotation.z = Math.PI / 2; body.position.y = 0.55; body.castShadow = true;
+  g.add(body);
+  return g;
+}
+
+function spawnAnimal(spec) {
+  return new Promise(resolve => {
+    loader.load(spec.file, gltf => {
+      const model = gltf.scene;
+      // normalize size
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const s = spec.height / Math.max(size.y, 0.001);
+      model.scale.setScalar(s);
+      model.traverse(o => { if (o.isMesh) { o.castShadow = true; } });
+      // re-center so feet sit on y=0
+      const b2 = new THREE.Box3().setFromObject(model);
+      model.position.y -= b2.min.y;
+
+      const clips = gltf.animations || [];
+      const mixer = new THREE.AnimationMixer(model);
+      const actions = {};
+      for (const key of ['Idle', 'Walk', 'Gallop', 'Eating']) {
+        const c = clipBySuffix(clips, key);
+        if (c) actions[key] = mixer.clipAction(c);
+      }
+      finishSpawn(spec, model, mixer, actions);
+      resolve();
+    }, undefined, () => {
+      // graceful fallback: a friendly capsule creature
+      const model = makeFallback(0xd98a4b);
+      finishSpawn(spec, model, new THREE.AnimationMixer(model), {});
+      resolve();
+    });
+  });
+}
+
+function finishSpawn(spec, model, mixer, actions) {
+  const a = Math.random() * Math.PI * 2, r = rand(4, 14);
+  model.position.set(Math.cos(a) * r, model.position.y, Math.sin(a) * r);
+  model.rotation.y = Math.random() * Math.PI * 2;
+  scene.add(model);
+
+  const animal = {
+    spec, model, mixer, actions,
+    state: 'idle', timer: rand(1, 4),
+    heading: model.rotation.y,
+    target: new THREE.Vector3(),
+    baseY: model.position.y,
+    action: null,
+  };
+  setAction(animal, 'Idle');
+  animals.push(animal);
+
+  loadedCount++;
+  bar.style.width = `${(loadedCount / SPECIES.length) * 100}%`;
+  loadNote.textContent = `Waking up ${spec.name} the ${spec.kind}…`;
+  if (loadedCount === SPECIES.length) {
+    setTimeout(() => document.getElementById('loader').classList.add('done'), 450);
+    startIntro();
+  }
+}
+
+function setAction(animal, key) {
+  const next = animal.actions[key];
+  if (animal.action === next) return;
+  if (next) {
+    next.reset();
+    if (animal.action) {
+      animal.action.crossFadeTo(next, 0.45, false);
+    }
+    next.play();
+  } else if (animal.action) {
+    animal.action.fadeOut(0.4);
+  }
+  animal.action = next || null;
+  const mood = document.getElementById('mood');
+  if (selected === animal && mood) {
+    mood.textContent = key === 'Idle' ? 'resting' : key === 'Walk' ? 'strolling' : key === 'Gallop' ? 'galloping!' : 'grazing';
+  }
+}
+
+function pickTarget(animal) {
+  const a = Math.random() * Math.PI * 2, r = rand(3, 19);
+  animal.target.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+}
+
+function updateAnimal(animal, dt, t) {
+  animal.mixer.update(dt);
+  const speed = animal.spec.speed;
+
+  if (animal.state === 'idle') {
+    animal.timer -= dt;
+    if (animal.timer <= 0) {
+      const roll = Math.random();
+      if (roll < 0.22 && animal.actions['Eating']) { animal.state = 'graze'; animal.timer = rand(2.5, 5); setAction(animal, 'Eating'); }
+      else { animal.state = 'walk'; pickTarget(animal); setAction(animal, 'Walk'); }
+    }
+  } else if (animal.state === 'graze') {
+    animal.timer -= dt;
+    if (animal.timer <= 0) { animal.state = 'idle'; animal.timer = rand(2, 6); setAction(animal, 'Idle'); }
+  } else if (animal.state === 'walk' || animal.state === 'gallop') {
+    const p = animal.model.position;
+    const dx = animal.target.x - p.x, dz = animal.target.z - p.z;
+    const dist = Math.hypot(dx, dz);
+    const wantGallop = animal.spec.gallop && animal.state === 'walk' && dist > 12 && Math.random() < 0.006;
+    if (wantGallop && animal.actions['Gallop']) { animal.state = 'gallop'; setAction(animal, 'Gallop'); }
+    if (dist < 0.7) {
+      animal.state = 'idle'; animal.timer = rand(2, 7); setAction(animal, 'Idle');
+    } else {
+      const sp = (animal.state === 'gallop' ? speed * 2.4 : speed);
+      const desired = Math.atan2(dx, dz);
+      let d = desired - animal.heading;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      animal.heading += THREE.MathUtils.clamp(d, -2.4 * dt, 2.4 * dt);
+      animal.model.rotation.y = animal.heading;
+      p.x += Math.sin(animal.heading) * sp * dt;
+      p.z += Math.cos(animal.heading) * sp * dt;
+      // stay on the island
+      const rr = Math.hypot(p.x, p.z);
+      if (rr > 21) { p.multiplyScalar(21 / rr); pickTarget(animal); }
+      if (animal.state === 'gallop' && dist < 6) { animal.state = 'walk'; setAction(animal, 'Walk'); }
+    }
+  }
+
+  // gentle idle bob for fallback creatures without clips
+  if (!animal.action) {
+    animal.model.position.y = animal.baseY + Math.sin(t * 2 + animal.heading) * 0.05;
+  }
+}
+
+// avoid animals walking through each other (cheap separation)
+function separate(dt) {
+  for (let i = 0; i < animals.length; i++) {
+    for (let j = i + 1; j < animals.length; j++) {
+      const a = animals[i].model.position, b = animals[j].model.position;
+      const dx = a.x - b.x, dz = a.z - b.z;
+      const d = Math.hypot(dx, dz);
+      if (d > 0.001 && d < 2.2) {
+        const push = (2.2 - d) * 0.5 * dt * 3;
+        const nx = dx / d, nz = dz / d;
+        a.x += nx * push; a.z += nz * push;
+        b.x -= nx * push; b.z -= nz * push;
+      }
+    }
+  }
+}
+
+/* ---------- picking ---------- */
+const tag = document.getElementById('tag');
+const card = document.getElementById('animal-card');
+function select(animal) {
+  selected = animal;
+  document.getElementById('ac-name').textContent = `${animal.spec.name} · ${animal.spec.kind}`;
+  document.getElementById('ac-fact').textContent = animal.spec.fact;
+  card.classList.add('show');
+  tag.textContent = animal.spec.name;
+  tag.classList.add('show');
+  document.getElementById('hint').style.display = 'none';
+}
+function deselect() {
+  selected = null;
+  card.classList.remove('show');
+  tag.classList.remove('show');
+}
+document.getElementById('release').addEventListener('click', deselect);
+window.addEventListener('keydown', e => { if (e.key === 'Escape') deselect(); });
+
+let downAt = 0;
+renderer.domElement.addEventListener('pointerdown', e => { downAt = performance.now(); });
+renderer.domElement.addEventListener('pointerup', e => {
+  if (performance.now() - downAt > 250) return; // it was a drag
+  pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(animals.map(a => a.model), true);
+  if (hits.length) {
+    let o = hits[0].object;
+    while (o && !animals.some(a => a.model === o)) o = o.parent;
+    const animal = animals.find(a => a.model === o);
+    if (animal) select(animal);
+  } else {
+    deselect();
+  }
+});
+renderer.domElement.addEventListener('pointermove', e => {
+  pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(animals.map(a => a.model), true);
+  renderer.domElement.style.cursor = hits.length ? 'pointer' : 'grab';
+});
+
+/* ============================================================
+   Day / dusk + pause
+============================================================ */
+let dusk = false, paused = false;
+const dayCfg = {
+  top: new THREE.Color(0x3f8fd6), mid: new THREE.Color(0xaedcf5), bot: new THREE.Color(0xeaf7e9),
+  fog: new THREE.Color(0xcfeaf7), sun: new THREE.Color(0xfff2d9), sunI: 2.0, hemiI: 0.85,
+  exposure: 1.05, stars: 0,
+};
+const duskCfg = {
+  top: new THREE.Color(0x1b2350), mid: new THREE.Color(0x7a5a9e), bot: new THREE.Color(0xff9d6b),
+  fog: new THREE.Color(0x6b5a8e), sun: new THREE.Color(0xffb27a), sunI: 1.1, hemiI: 0.45,
+  exposure: 0.95, stars: 1,
+};
+let blend = 0, blendTarget = 0;
+const _c = new THREE.Color();
+function applySky(b) {
+  skyUniforms.topColor.value.lerpColors(dayCfg.top, duskCfg.top, b);
+  skyUniforms.midColor.value.lerpColors(dayCfg.mid, duskCfg.mid, b);
+  skyUniforms.bottomColor.value.lerpColors(dayCfg.bot, duskCfg.bot, b);
+  scene.fog.color.lerpColors(dayCfg.fog, duskCfg.fog, b);
+  sun.color.lerpColors(dayCfg.sun, duskCfg.sun, b);
+  sun.intensity = THREE.MathUtils.lerp(dayCfg.sunI, duskCfg.sunI, b);
+  hemi.intensity = THREE.MathUtils.lerp(dayCfg.hemiI, duskCfg.hemiI, b);
+  renderer.toneMappingExposure = THREE.MathUtils.lerp(dayCfg.exposure, duskCfg.exposure, b);
+  starMat.opacity = THREE.MathUtils.lerp(dayCfg.stars, duskCfg.stars, b);
+  document.body.style.background = '#' + scene.fog.color.getHexString();
+}
+document.getElementById('daynight').addEventListener('click', e => {
+  dusk = !dusk;
+  blendTarget = dusk ? 1 : 0;
+  e.currentTarget.textContent = dusk ? '☀️ Day' : '🌙 Dusk';
+});
+const pauseBtn = document.getElementById('pause');
+pauseBtn.addEventListener('click', () => {
+  paused = !paused;
+  pauseBtn.textContent = paused ? '▶ Resume' : '⏸ Pause';
+});
+
+/* ============================================================
+   Intro camera sweep
+============================================================ */
+let intro = null;
+function startIntro() {
+  intro = { t: 0, dur: 3.2, from: camera.position.clone(), to: new THREE.Vector3(17, 10, 24) };
+}
+const easeInOut = x => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+
+/* ============================================================
+   Main loop
+============================================================ */
+const clock = new THREE.Clock();
+const followPos = new THREE.Vector3();
+const tagV = new THREE.Vector3();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const rawDt = Math.min(clock.getDelta(), 0.05);
+  const dt = paused ? 0 : rawDt;
+  const t = clock.elapsedTime;
+
+  if (intro) {
+    intro.t += rawDt;
+    const k = easeInOut(Math.min(intro.t / intro.dur, 1));
+    camera.position.lerpVectors(intro.from, intro.to, k);
+    if (intro.t >= intro.dur) intro = null;
+  }
+
+  // clouds drift
+  for (const c of clouds) {
+    c.position.x += c.userData.speed * dt;
+    if (c.position.x > 70) c.position.x = -70;
+  }
+
+  // day/dusk blend
+  if (Math.abs(blend - blendTarget) > 0.001) {
+    blend += Math.sign(blendTarget - blend) * Math.min(Math.abs(blendTarget - blend), rawDt * 0.8);
+    applySky(blend);
+  }
+
+  for (const a of animals) updateAnimal(a, dt, t);
+  separate(dt);
+
+  // follow selected animal
+  if (selected) {
+    followPos.copy(selected.model.position); followPos.y += 1.2;
+    controls.target.lerp(followPos, 1 - Math.pow(0.001, rawDt));
+    // floating tag
+    tagV.copy(selected.model.position); tagV.y += selected.spec.height + 0.9;
+    tagV.project(camera);
+    tag.style.left = `${(tagV.x * 0.5 + 0.5) * window.innerWidth}px`;
+    tag.style.top = `${(-tagV.y * 0.5 + 0.5) * window.innerHeight}px`;
+  } else {
+    controls.target.lerp(new THREE.Vector3(0, 1.2, 0), 1 - Math.pow(0.001, rawDt));
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// go
+applySky(0);
+Promise.all(SPECIES.map(spawnAnimal)).catch(() => {});
+animate();
+</script>
+</body>
+</html>
