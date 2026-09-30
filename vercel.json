@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/models/:file",
+      "destination": "https://cdn.jsdelivr.net/gh/yusib147/3d-animal-website@main/models/:file"
+    }
+  ]
+}
